@@ -1,0 +1,172 @@
+function [x,obj,times,mses]= ...
+         IST(y,A,tau,varargin)
+  
+% This function solves the convex problem
+% arg min_theta = 0.5*|| y - A x ||_2^2 + tau ||x||_1
+% using the IST algorithm, described in the paper
+%
+%  ===== Required inputs =============
+%
+%  y: 1D vector or 2D array (image) of observations
+%     
+%  A: measurement operator (a handle in matlab)
+%
+%  tau: usually, a non-negative real parameter of the obj 
+%
+%  ===== Optional inputs =============
+%
+%  
+%  'AT'    = function handle for the function that implements
+%            the multiplication by the conjugate of A, when A
+%            is a function handle. If A is an array, AT is ignored.
+%
+%  'StopCriterion' = type of stopping criterion to use
+%                    0 = algorithm stops when the relative 
+%                        change in the number of non-zero 
+%                        components of the estimate falls 
+%                        below 'Tolerance'
+%                    1 = stop when the relative 
+%                       change in the obj function 
+%                       falls below 'Tolerance'
+%                    4 = stop when the obj function 
+%                        becomes equal or less than Tolerance.
+%                    Default = 3.
+%
+%  'Tolerance' = stopping threshold; Default = 0.01
+%
+%  'Maxiter' = maximum number of iterations allowed in the
+%               main phase of the algorithm.
+%               Default = 1000
+%
+%  'MiniterA' = minimum number of iterations performed in the
+%               main phase of the algorithm.
+%               Default = 5
+%
+%  'Initialization' must be one of {0,1,2,array}
+%               0 -> Initialization at zero. 
+%               1 -> Random initialization.
+%               2 -> initialization with A'*y.
+%           array -> initialization provided by the user.
+%               Default = 0;
+%             
+%  'True_x' = if the true underlying x is passed in 
+%                this argument, MSE plots are generated.
+%
+% ===================================================  
+% ============ Outputs ==============================
+%   x = solution of the main algorithm
+%
+%   obj = sequence of values of the obj function
+%
+%   times = CPU time after each iteration
+%
+%   mses = sequence of MSE values, with respect to True_x,
+%          if it was given; if it was not given, mses is empty,
+%          mses = [].
+% ========================================================
+
+% test for number of required parametres
+if (nargin-length(varargin)) ~= 3
+     error('Wrong number of required parameters');
+end
+
+% Set the defaults for the optional parameters
+tol = 0.01;
+maxiter = 10000;
+AT = 0;
+% Set the defaults for outputs that may not be computed
+mses = [];
+
+% Read the optional parameters
+if (rem(length(varargin),2)==1)
+  error('Optional parameters should always go by pairs');
+else
+  for i=1:2:(length(varargin)-1)
+    switch varargin{i}
+     case 'Tolerance'       
+       tol = varargin{i+1};
+     case 'Maxiter'
+       maxiter = varargin{i+1};
+     case 'Initialization'
+       x = varargin{i+1};
+     case 'True_x'
+       true = varargin{i+1};
+     case 'AT'
+       AT = varargin{i+1};
+     otherwise
+      % Hmmm, something wrong with the parameter string
+      error(['Unrecognized option: ''' varargin{i} '''']);
+    end;
+  end;
+end
+
+
+  % compute gradient
+g = -AT(y-A(x));
+  % compute the current objective 
+f = (y-A(x))'*(y-A(x))/2+tau*x'*x;
+  
+
+% start the clock
+t0 = cputime;
+iter = 1;
+times(iter) = cputime - t0;
+obj(iter) = f;
+
+% compute mse
+err = true - x;
+mses(iter) = (err(:)'*err(:));
+
+% compute nonzeros in x
+num_nz_x = sum(x~=0);
+fprintf(1,'iter = %5d, obj = %10.6e, mse = %10.6e, nonzeros = %7d\n',iter,obj(iter),mses(iter),num_nz_x);
+
+cont_outer = 1;
+while cont_outer
+  % store previous objective 
+  prev_f = f;
+  
+  % compute x
+  x = soft(x-g,tau); 
+  % compute gradient
+  g =-AT(y-A(x));
+  % compute the current objective 
+  f = (y-A(x))'*(y-A(x))/2+tau*x'*x;
+  
+  % compute the number of nonzeros in x
+  num_nz_x = sum(x~=0);
+
+  % compute the relative change in objective
+  ChangeObj = abs(f-prev_f)/(prev_f);
+  
+
+  
+  iter = iter + 1;
+  obj(iter) = f;
+  times(iter) = cputime-t0;
+  
+ 
+  err = true - x;
+  mses(iter) = err(:)'*err(:);
+  
+  fprintf(1,'iter = %5d, obj = %10.6e, mse = %10.6e, nonzeros = %7d\n',iter,obj(iter),mses(iter),num_nz_x);
+
+  cont_outer = ((iter <= maxiter) & (ChangeObj > tol));
+
+end 
+
+mses = mses/length(true(:));
+
+
+% Printout results
+fprintf(1,'\nFinished the main algorithm!\nResults:\n');
+% fprintf(1,'||A x - y ||_2 = %10.3e\n',resid(:)'*resid(:));
+fprintf(1,'||x||_1 = %10.3e\n',sum(abs(x(:))));
+fprintf(1,'obj function = %10.3e\n',f);
+fprintf(1,'Number of non-zero components = %d\n',num_nz_x);
+fprintf(1,'CPU time so far = %10.3e\n', times(iter));
+fprintf(1,'\n');
+
+
+
+
